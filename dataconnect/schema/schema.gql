@@ -1,0 +1,43 @@
+type Organization @table {
+  name: String!
+  createdAt: Timestamp!
+  address: String
+  contactEmail: String
+  contactPhone: String
+}
+
+type Service @table {
+  organization: Organization!
+  name: String!
+  averageServiceTime: Int!
+  createdAt: Timestamp!
+  description: String
+  maxCapacity: Int
+}
+
+type Queue @table {
+  service: Service!
+  name: String!
+  status: String!
+  createdAt: Timestamp!
+  description: String
+  maxQueueLength: Int
+}
+
+type Customer @table {
+  name: String!
+  createdAt: Timestamp!
+  phoneNumber: String
+  email: String
+}
+
+type QueueEntry @table {
+  customer: Customer!
+  queue: Queue!
+  entryTime: Timestamp!
+  status: String!
+  createdAt: Timestamp!
+  callTime: Timestamp
+  servedTime: Timestamp
+  noShowTime: Timestamp
+}
