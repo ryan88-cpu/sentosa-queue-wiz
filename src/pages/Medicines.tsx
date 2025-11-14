@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,20 +14,9 @@ interface Medicine {
   name: string;
   category: string;
   price: number;
-  inStock: boolean;
-  description: string;
+  in_stock: boolean;
+  description: string | null;
 }
-
-const availableMedicines: Medicine[] = [
-  { id: "1", name: "Paracetamol 500mg", category: "Pain Relief", price: 5, inStock: true, description: "For fever and mild pain" },
-  { id: "2", name: "Ibuprofen 400mg", category: "Pain Relief", price: 8, inStock: true, description: "Anti-inflammatory pain relief" },
-  { id: "3", name: "Amoxicillin 250mg", category: "Antibiotic", price: 15, inStock: true, description: "Broad-spectrum antibiotic" },
-  { id: "4", name: "Cetirizine 10mg", category: "Allergy", price: 6, inStock: true, description: "Antihistamine for allergies" },
-  { id: "5", name: "Omeprazole 20mg", category: "Digestive", price: 12, inStock: true, description: "Reduces stomach acid" },
-  { id: "6", name: "Loratadine 10mg", category: "Allergy", price: 7, inStock: false, description: "24-hour allergy relief" },
-  { id: "7", name: "Vitamin C 1000mg", category: "Supplement", price: 10, inStock: true, description: "Immune system support" },
-  { id: "8", name: "Cough Syrup", category: "Cold & Flu", price: 9, inStock: true, description: "Relieves cough and throat irritation" },
-];
 
 export default function Medicines() {
   const navigate = useNavigate();
@@ -34,12 +24,34 @@ export default function Medicines() {
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
   const [cart, setCart] = useState<{ medicine: Medicine; quantity: number }[]>([]);
   const [orderSubmitted, setOrderSubmitted] = useState(false);
+  const [medicines, setMedicines] = useState<Medicine[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const categories = ["All", ...Array.from(new Set(availableMedicines.map(m => m.category)))];
+  useEffect(() => {
+    fetchMedicines();
+  }, []);
 
-  const filteredMedicines = availableMedicines.filter(medicine => {
+  const fetchMedicines = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('medicines')
+        .select('*')
+        .order('name');
+
+      if (error) throw error;
+      setMedicines(data || []);
+    } catch (error: any) {
+      toast.error("Failed to load medicines: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const categories = ["All", ...Array.from(new Set(medicines.map(m => m.category)))];
+
+  const filteredMedicines = medicines.filter(medicine => {
     const matchesSearch = medicine.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         medicine.description.toLowerCase().includes(searchTerm.toLowerCase());
+                         (medicine.description?.toLowerCase() || '').includes(searchTerm.toLowerCase());
     const matchesCategory = selectedCategory === "All" || medicine.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
@@ -74,21 +86,38 @@ export default function Medicines() {
 
   const totalAmount = cart.reduce((sum, item) => sum + (item.medicine.price * item.quantity), 0);
 
-  const handleSubmitOrder = () => {
+  const handleSubmitOrder = async () => {
     if (cart.length === 0) {
       toast.error("Please add medicines to your cart");
       return;
     }
-    // Store order in localStorage for demo
-    const order = {
-      id: Math.floor(Math.random() * 1000),
-      items: cart,
-      total: totalAmount,
-      timestamp: new Date().toISOString(),
-    };
-    localStorage.setItem(`medicine-order-${order.id}`, JSON.stringify(order));
-    setOrderSubmitted(true);
-    toast.success("Medicine order submitted successfully!");
+
+    try {
+      // Get next order number
+      const { data: orderNum } = await supabase.rpc('get_next_order_number');
+      
+      // Create order
+      const { error } = await supabase
+        .from('medicine_orders')
+        .insert({
+          order_number: orderNum,
+          items: cart.map(item => ({
+            medicine_id: item.medicine.id,
+            medicine_name: item.medicine.name,
+            quantity: item.quantity,
+            price: item.medicine.price,
+          })),
+          total: totalAmount,
+          status: 'pending',
+        });
+
+      if (error) throw error;
+
+      setOrderSubmitted(true);
+      toast.success("Medicine order submitted successfully!");
+    } catch (error: any) {
+      toast.error("Failed to submit order: " + error.message);
+    }
   };
 
   if (orderSubmitted) {
@@ -200,8 +229,8 @@ export default function Medicines() {
                             <CardTitle className="text-lg">{medicine.name}</CardTitle>
                             <CardDescription className="text-xs">{medicine.category}</CardDescription>
                           </div>
-                          <Badge variant={medicine.inStock ? "default" : "destructive"}>
-                            {medicine.inStock ? "In Stock" : "Out of Stock"}
+                          <Badge variant={medicine.in_stock ? "default" : "destructive"}>
+                            {medicine.in_stock ? "In Stock" : "Out of Stock"}
                           </Badge>
                         </div>
                       </CardHeader>
@@ -212,7 +241,7 @@ export default function Medicines() {
                           <Button 
                             size="sm" 
                             onClick={() => addToCart(medicine)}
-                            disabled={!medicine.inStock}
+                            disabled={!medicine.in_stock}
                           >
                             Add to Cart
                           </Button>
