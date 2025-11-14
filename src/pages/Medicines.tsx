@@ -111,12 +111,12 @@ export default function Medicines() {
                 {cart.map(item => (
                   <div key={item.medicine.id} className="flex justify-between text-sm mb-1">
                     <span>{item.medicine.name} x{item.quantity}</span>
-                    <span>RM {(item.medicine.price * item.quantity).toFixed(2)}</span>
+                    <span>Rp {(item.medicine.price * item.quantity).toLocaleString('id-ID')}</span>
                   </div>
                 ))}
                 <div className="border-t border-border mt-2 pt-2 flex justify-between font-semibold">
                   <span>Total</span>
-                  <span className="text-accent">RM {totalAmount.toFixed(2)}</span>
+                  <span className="text-accent">Rp {totalAmount.toLocaleString('id-ID')}</span>
                 </div>
               </div>
               <p className="text-sm text-muted-foreground text-center">
@@ -208,7 +208,7 @@ export default function Medicines() {
                       <CardContent>
                         <p className="text-sm text-muted-foreground mb-3">{medicine.description}</p>
                         <div className="flex justify-between items-center">
-                          <span className="text-xl font-bold text-accent">RM {medicine.price.toFixed(2)}</span>
+                          <span className="text-xl font-bold text-accent">Rp {medicine.price.toLocaleString('id-ID')}</span>
                           <Button 
                             size="sm" 
                             onClick={() => addToCart(medicine)}
@@ -281,7 +281,7 @@ export default function Medicines() {
                             </Button>
                           </div>
                           <span className="font-semibold text-accent">
-                            RM {(item.medicine.price * item.quantity).toFixed(2)}
+                            Rp {(item.medicine.price * item.quantity).toLocaleString('id-ID')}
                           </span>
                         </div>
                       </div>
@@ -290,7 +290,7 @@ export default function Medicines() {
                     <div className="border-t border-border pt-4 mt-4">
                       <div className="flex justify-between items-center mb-4">
                         <span className="font-semibold">Total</span>
-                        <span className="text-2xl font-bold text-accent">RM {totalAmount.toFixed(2)}</span>
+                        <span className="text-2xl font-bold text-accent">Rp {totalAmount.toLocaleString('id-ID')}</span>
                       </div>
                       <Button className="w-full" size="lg" onClick={handleSubmitOrder}>
                         Submit Order
