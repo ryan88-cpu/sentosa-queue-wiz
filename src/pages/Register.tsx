@@ -1,176 +1,174 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, CheckCircle } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
+import { Check, ArrowLeft } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
-const Register = () => {
+export default function Register() {
   const navigate = useNavigate();
-  const { toast } = useToast();
-  const [isSubmitted, setIsSubmitted] = useState(false);
-  const [queueNumber, setQueueNumber] = useState(0);
+  const [submittedQueueNumber, setSubmittedQueueNumber] = useState<number | null>(null);
   const [formData, setFormData] = useState({
     fullName: "",
     dateOfBirth: "",
     contactNumber: "",
-    reason: "",
+    reasonForVisit: "",
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Generate random queue number
-    const newQueueNumber = Math.floor(Math.random() * 100) + 1;
-    setQueueNumber(newQueueNumber);
-    setIsSubmitted(true);
+    if (!formData.fullName || !formData.dateOfBirth || !formData.contactNumber || !formData.reasonForVisit) {
+      toast.error("Please fill in all fields");
+      return;
+    }
 
-    toast({
-      title: "Registration Successful!",
-      description: `Your queue number is #${newQueueNumber}`,
-    });
+    try {
+      // Insert patient
+      const { data: patient, error: patientError } = await supabase
+        .from('patients')
+        .insert({
+          full_name: formData.fullName,
+          date_of_birth: formData.dateOfBirth,
+          contact_number: formData.contactNumber,
+          reason_for_visit: formData.reasonForVisit,
+        })
+        .select()
+        .single();
+
+      if (patientError) throw patientError;
+
+      // Get next queue number
+      const { data: queueNum } = await supabase.rpc('get_next_queue_number');
+      
+      // Create queue entry
+      const { error: queueError } = await supabase
+        .from('queue_entries')
+        .insert({
+          patient_id: patient.id,
+          queue_number: queueNum,
+          status: 'waiting',
+          estimated_wait_time: queueNum * 15,
+        });
+
+      if (queueError) throw queueError;
+
+      setSubmittedQueueNumber(queueNum);
+      toast.success("Registration successful!");
+    } catch (error: any) {
+      toast.error("Registration failed: " + error.message);
+    }
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
-  };
-
-  if (isSubmitted) {
+  if (submittedQueueNumber) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center px-4">
-        <Card className="w-full max-w-md p-8 bg-card border-accent animate-fade-in">
-          <div className="text-center space-y-6">
-            <div className="flex justify-center">
-              <div className="p-4 bg-accent/20 rounded-full">
-                <CheckCircle className="w-16 h-16 text-accent" />
+      <div className="min-h-screen bg-gradient-to-b from-background to-background/80 p-4">
+        <div className="container max-w-md mx-auto pt-16">
+          <Card className="border-accent/20 shadow-glow animate-fade-in">
+            <CardHeader className="text-center">
+              <div className="w-16 h-16 bg-accent/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Check className="w-8 h-8 text-accent" />
               </div>
-            </div>
-            <h2 className="text-3xl font-bold text-foreground">Registration Successful!</h2>
-            <div className="p-6 bg-accent/10 rounded-lg">
-              <p className="text-muted-foreground mb-2">Your queue number is</p>
-              <p className="text-6xl font-bold text-accent">#{queueNumber}</p>
-            </div>
-            <p className="text-muted-foreground">
-              Please wait for your number to be called. You can check the current queue status.
-            </p>
-            <div className="space-y-3">
-              <Button
-                onClick={() => navigate("/queue")}
-                className="w-full bg-accent hover:bg-accent/90 text-accent-foreground font-medium"
-              >
-                View Current Queue
-              </Button>
-              <Button
-                onClick={() => navigate("/")}
-                variant="outline"
-                className="w-full border-accent text-accent hover:bg-accent/10"
-              >
-                Back to Home
-              </Button>
-            </div>
-          </div>
-        </Card>
+              <CardTitle className="text-3xl">Registration Successful!</CardTitle>
+              <CardDescription className="text-lg mt-2">
+                Your queue number is
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="bg-accent/10 p-8 rounded-lg text-center">
+                <span className="text-6xl font-bold text-accent">#{submittedQueueNumber}</span>
+              </div>
+              <p className="text-sm text-muted-foreground text-center">
+                Please wait for your number to be called. You can check the current queue status.
+              </p>
+              <div className="flex gap-2">
+                <Button onClick={() => navigate("/queue")} className="flex-1">
+                  View Current Queue
+                </Button>
+                <Button onClick={() => navigate("/")} variant="outline" className="flex-1">
+                  Back to Home
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-4 py-8 max-w-2xl">
-        <Button
-          onClick={() => navigate("/")}
-          variant="ghost"
-          className="mb-6 text-accent hover:text-accent/80 hover:bg-accent/10"
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" />
+    <div className="min-h-screen bg-gradient-to-b from-background to-background/80 p-4">
+      <div className="container max-w-2xl mx-auto pt-8">
+        <Button onClick={() => navigate("/")} variant="ghost" size="sm" className="mb-6">
+          <ArrowLeft className="w-4 h-4 mr-2" />
           Back to Home
         </Button>
 
-        <Card className="p-8 bg-card border-border animate-slide-up">
-          <h1 className="text-3xl font-bold mb-2 text-foreground">Patient Registration</h1>
-          <p className="text-muted-foreground mb-8">
-            Please fill in your details to register for queue
-          </p>
+        <Card className="border-accent/20 shadow-glow animate-fade-in">
+          <CardHeader>
+            <CardTitle className="text-3xl">Patient Registration</CardTitle>
+            <CardDescription>
+              Please fill in your details to register for the queue
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="fullName">Full Name *</Label>
+                <Input
+                  id="fullName"
+                  value={formData.fullName}
+                  onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+                  placeholder="Enter your full name"
+                  required
+                />
+              </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="fullName" className="text-foreground">
-                Full Name *
-              </Label>
-              <Input
-                id="fullName"
-                name="fullName"
-                value={formData.fullName}
-                onChange={handleChange}
-                required
-                className="bg-secondary border-border text-foreground focus:border-accent"
-                placeholder="Enter your full name"
-              />
-            </div>
+              <div className="space-y-2">
+                <Label htmlFor="dateOfBirth">Date of Birth *</Label>
+                <Input
+                  id="dateOfBirth"
+                  type="date"
+                  value={formData.dateOfBirth}
+                  onChange={(e) => setFormData({ ...formData, dateOfBirth: e.target.value })}
+                  required
+                />
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="dateOfBirth" className="text-foreground">
-                Date of Birth *
-              </Label>
-              <Input
-                id="dateOfBirth"
-                name="dateOfBirth"
-                type="date"
-                value={formData.dateOfBirth}
-                onChange={handleChange}
-                required
-                className="bg-secondary border-border text-foreground focus:border-accent"
-              />
-            </div>
+              <div className="space-y-2">
+                <Label htmlFor="contactNumber">Contact Number *</Label>
+                <Input
+                  id="contactNumber"
+                  type="tel"
+                  value={formData.contactNumber}
+                  onChange={(e) => setFormData({ ...formData, contactNumber: e.target.value })}
+                  placeholder="e.g., +62 812-3456-7890"
+                  required
+                />
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="contactNumber" className="text-foreground">
-                Contact Number *
-              </Label>
-              <Input
-                id="contactNumber"
-                name="contactNumber"
-                type="tel"
-                value={formData.contactNumber}
-                onChange={handleChange}
-                required
-                className="bg-secondary border-border text-foreground focus:border-accent"
-                placeholder="+62 xxx xxxx xxxx"
-              />
-            </div>
+              <div className="space-y-2">
+                <Label htmlFor="reasonForVisit">Reason for Visit *</Label>
+                <Textarea
+                  id="reasonForVisit"
+                  value={formData.reasonForVisit}
+                  onChange={(e) => setFormData({ ...formData, reasonForVisit: e.target.value })}
+                  placeholder="Brief description of your medical concern"
+                  rows={4}
+                  required
+                />
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="reason" className="text-foreground">
-                Reason for Visit *
-              </Label>
-              <Textarea
-                id="reason"
-                name="reason"
-                value={formData.reason}
-                onChange={handleChange}
-                required
-                className="bg-secondary border-border text-foreground focus:border-accent min-h-24"
-                placeholder="Please describe your symptoms or reason for visit"
-              />
-            </div>
-
-            <Button
-              type="submit"
-              className="w-full bg-accent hover:bg-accent/90 text-accent-foreground font-medium text-lg py-6"
-            >
-              Submit Registration
-            </Button>
-          </form>
+              <Button type="submit" className="w-full" size="lg">
+                Submit Registration
+              </Button>
+            </form>
+          </CardContent>
         </Card>
       </div>
     </div>
   );
-};
-
-export default Register;
+}
