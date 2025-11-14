@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useNavigate } from "react-router-dom";
-import { Users, ClipboardList, LogIn } from "lucide-react";
+import { Users, ClipboardList, LogIn, Pill } from "lucide-react";
 import clinicHero from "@/assets/clinic-hero.jpg";
 import doctorIcon from "@/assets/doctor-icon.png";
 
@@ -32,7 +32,7 @@ const Home = () => {
           <div className="absolute inset-0 bg-gradient-to-t from-background/90 to-transparent" />
         </div>
 
-        <div className="grid md:grid-cols-3 gap-6 mb-12">
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
           <Card 
             className="p-8 bg-card border-border hover:border-accent transition-all duration-300 cursor-pointer card-hover group"
             onClick={() => navigate("/register")}
@@ -71,6 +71,27 @@ const Home = () => {
                 className="w-full bg-accent hover:bg-accent/90 text-accent-foreground font-medium"
               >
                 View Now
+              </Button>
+            </div>
+          </Card>
+
+          <Card 
+            className="p-8 bg-card border-border hover:border-accent transition-all duration-300 cursor-pointer card-hover group"
+            onClick={() => navigate("/medicines")}
+          >
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className="p-4 bg-accent/10 rounded-full group-hover:bg-accent/20 transition-colors">
+                <Pill className="w-8 h-8 text-accent" />
+              </div>
+              <h2 className="text-xl font-semibold text-foreground">Request Medicines</h2>
+              <p className="text-muted-foreground text-sm">
+                Browse and order medicines for pickup at the pharmacy
+              </p>
+              <Button 
+                variant="default" 
+                className="w-full bg-accent hover:bg-accent/90 text-accent-foreground font-medium"
+              >
+                Order Now
               </Button>
             </div>
           </Card>
