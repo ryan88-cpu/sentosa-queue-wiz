@@ -8,6 +8,7 @@ import Register from "./pages/Register";
 import Queue from "./pages/Queue";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
+import Medicines from "./pages/Medicines";
 import NotFound from "./pages/NotFound";
 import Chatbot from "./components/Chatbot";
 
@@ -23,6 +24,7 @@ const App = () => (
           <Route path="/" element={<Home />} />
           <Route path="/register" element={<Register />} />
           <Route path="/queue" element={<Queue />} />
+          <Route path="/medicines" element={<Medicines />} />
           <Route path="/login" element={<Login />} />
           <Route path="/dashboard" element={<Dashboard />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
