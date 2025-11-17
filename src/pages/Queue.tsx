@@ -4,18 +4,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Clock, RefreshCw } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { db } from "@/config/firebase/firebase.js";
+import { ref, onValue } from "firebase/database";
 
 interface QueueEntry {
   id: string;
-  queue_number: number;
+  queueNumber: number;
   status: string;
-  estimated_wait_time: number;
-  patient_id: string;
-  patients: {
-    full_name: string;
-  };
+  estimatedWaitTime: number;
+  patientId: string;
+  fullName: string;
 }
 
 export default function Queue() {
@@ -24,85 +23,77 @@ export default function Queue() {
   const [loading, setLoading] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
 
-  const fetchQueue = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('queue_entries')
-        .select(`
-          id,
-          queue_number,
-          status,
-          estimated_wait_time,
-          patient_id,
-          patients (
-            full_name
-          )
-        `)
-        .in('status', ['waiting', 'being_examined'])
-        .order('queue_number', { ascending: true });
-
-      if (error) throw error;
-      setQueueData(data || []);
-    } catch (error: any) {
-      toast.error("Failed to load queue: " + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Fetch queue from Firebase
   useEffect(() => {
-    fetchQueue();
+    const queueRef = ref(db, "queue");
+    const patientsRef = ref(db, "patients");
 
-    // Set up realtime subscription
-    const channel = supabase
-      .channel('queue-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'queue_entries',
-        },
-        () => {
-          fetchQueue();
-        }
-      )
-      .subscribe();
+    // live listener for queue + patients
+    const unsubscribeQueue = onValue(queueRef, (snapshot) => {
+      const queueObj = snapshot.val() || {};
+      const tempQueue: QueueEntry[] = Object.entries(queueObj).map(
+        ([id, value]: any) => ({
+          id,
+          queueNumber: value.queueNumber,
+          status: value.status,
+          estimatedWaitTime: value.estimatedWaitTime || 0,
+          patientId: value.patientId,
+          fullName: "", // will fill later
+        })
+      );
 
-    // Auto-refresh every 30 seconds
-    const interval = autoRefresh ? setInterval(fetchQueue, 30000) : null;
+      // load patient details to match
+      onValue(patientsRef, (patientsSnap) => {
+        const patientsObj = patientsSnap.val() || {};
+        const merged = tempQueue.map((entry) => ({
+          ...entry,
+          fullName:
+            patientsObj[entry.patientId]?.fullName || "Unknown Patient",
+        }));
 
-    return () => {
-      supabase.removeChannel(channel);
-      if (interval) clearInterval(interval);
-    };
-  }, [autoRefresh]);
+        const visible = merged
+          .filter(
+            (q) =>
+              q.status === "waiting" || q.status === "being_examined"
+          )
+          .sort((a, b) => a.queueNumber - b.queueNumber);
+
+        setQueueData(visible);
+        setLoading(false);
+      });
+    });
+
+    return () => unsubscribeQueue();
+  }, []);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'waiting':
+      case "waiting":
         return <Badge variant="outline">Waiting</Badge>;
-      case 'being_examined':
-        return <Badge className="bg-accent text-accent-foreground">Being Examined</Badge>;
+      case "being_examined":
+        return (
+          <Badge className="bg-accent text-accent-foreground">
+            Being Examined
+          </Badge>
+        );
       default:
         return <Badge variant="secondary">Done</Badge>;
     }
   };
 
-  const getInitials = (fullName: string) => {
-    return fullName
-      .split(' ')
-      .map(n => n[0])
-      .join('')
+  const getInitials = (fullName: string) =>
+    fullName
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
       .toUpperCase();
-  };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-background to-background/80 flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center text-muted-foreground">
         <div className="text-center">
           <RefreshCw className="w-8 h-8 animate-spin text-accent mx-auto mb-2" />
-          <p className="text-muted-foreground">Loading queue...</p>
+          <p>Loading queue...</p>
         </div>
       </div>
     );
@@ -114,7 +105,7 @@ export default function Queue() {
         <div className="mb-6 flex items-center justify-between">
           <Button onClick={() => navigate("/")} variant="ghost" size="sm">
             <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Home
+            Back to Home
           </Button>
           <div className="flex items-center gap-2">
             <Button
@@ -122,28 +113,34 @@ export default function Queue() {
               size="sm"
               onClick={() => setAutoRefresh(!autoRefresh)}
             >
-              <RefreshCw className={`w-4 h-4 mr-2 ${autoRefresh ? 'animate-spin' : ''}`} />
-              {autoRefresh ? 'Auto-refresh ON' : 'Auto-refresh OFF'}
-            </Button>
-            <Button onClick={fetchQueue} variant="outline" size="sm">
-              Refresh Now
+              <RefreshCw
+                className={`w-4 h-4 mr-2 ${
+                  autoRefresh ? "animate-spin" : ""
+                }`}
+              />
+              {autoRefresh ? "Live Updates ON" : "Live Updates OFF"}
             </Button>
           </div>
         </div>
 
         <Card className="border-accent/20 shadow-glow animate-fade-in">
           <CardHeader>
-            <CardTitle className="text-3xl text-center">Current Queue</CardTitle>
+            <CardTitle className="text-3xl text-center">
+              Current Queue
+            </CardTitle>
             <p className="text-center text-accent text-sm mt-2">
-              Please wait for your number to be called
+              Only patients who registered are shown here
             </p>
           </CardHeader>
+
           <CardContent>
             {queueData.length === 0 ? (
               <div className="text-center py-12">
-                <p className="text-muted-foreground text-lg mb-4">No patients in queue</p>
+                <p className="text-muted-foreground text-lg mb-4">
+                  No patients in queue
+                </p>
                 <Button onClick={() => navigate("/register")}>
-                  Register New Patient
+                  Register New Patient
                 </Button>
               </div>
             ) : (
@@ -152,9 +149,9 @@ export default function Queue() {
                   <Card
                     key={entry.id}
                     className={`border-border/50 ${
-                      entry.status === 'being_examined'
-                        ? 'bg-accent/10 border-accent/50'
-                        : 'bg-card'
+                      entry.status === "being_examined"
+                        ? "bg-accent/10 border-accent/50"
+                        : "bg-card"
                     } transition-all animate-slide-up`}
                     style={{ animationDelay: `${index * 0.1}s` }}
                   >
@@ -163,27 +160,27 @@ export default function Queue() {
                         <div className="flex items-center gap-4">
                           <div className="w-16 h-16 bg-accent/20 rounded-full flex items-center justify-center">
                             <span className="text-2xl font-bold text-accent">
-                              #{entry.queue_number}
+                              #{entry.queueNumber}
                             </span>
                           </div>
                           <div>
                             <h3 className="text-xl font-semibold">
-                              Patient {getInitials(entry.patients.full_name)}
+                              {entry.fullName}
                             </h3>
                             <div className="flex items-center gap-2 mt-1">
                               {getStatusBadge(entry.status)}
-                              {entry.status === 'waiting' && (
+                              {entry.status === "waiting" && (
                                 <div className="flex items-center text-sm text-muted-foreground">
                                   <Clock className="w-4 h-4 mr-1" />
-                                  Est. wait: ~{entry.estimated_wait_time} min
+                                  Est. wait: ~{entry.estimatedWaitTime} min
                                 </div>
                               )}
                             </div>
                           </div>
                         </div>
-                        {entry.status === 'being_examined' && (
+                        {entry.status === "being_examined" && (
                           <div className="text-accent font-semibold animate-pulse">
-                            NOW SERVING
+                            NOW SERVING
                           </div>
                         )}
                       </div>
@@ -195,11 +192,9 @@ export default function Queue() {
           </CardContent>
         </Card>
 
-        <div className="mt-8 text-center">
-          <p className="text-sm text-muted-foreground mb-4">
-            Queue updates automatically • Last updated: {new Date().toLocaleTimeString()}
-          </p>
-        </div>
+        <p className="text-sm text-muted-foreground text-center mt-6">
+          Real‑time queue updates • {new Date().toLocaleTimeString()}
+        </p>
       </div>
     </div>
   );

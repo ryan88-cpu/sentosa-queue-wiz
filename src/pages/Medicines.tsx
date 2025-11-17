@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/config/firebase/firebase.js";
+import { ref, onValue, push, set, runTransaction, serverTimestamp } from "firebase/database";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -27,43 +28,49 @@ export default function Medicines() {
   const [medicines, setMedicines] = useState<Medicine[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // --------------------------------
+  // 1️⃣  Fetch medicines from Firebase
+  // --------------------------------
   useEffect(() => {
-    fetchMedicines();
+    const medicinesRef = ref(db, "medicines");
+
+    const unsubscribe = onValue(medicinesRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const meds = Object.entries(data).map(([id, value]: any) => ({
+          id,
+          ...value,
+        }));
+        setMedicines(meds);
+      } else {
+        setMedicines([]);
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
   }, []);
 
-  const fetchMedicines = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('medicines')
-        .select('*')
-        .order('name');
+  const categories = ["All", ...Array.from(new Set(medicines.map((m) => m.category)))];
 
-      if (error) throw error;
-      setMedicines(data || []);
-    } catch (error: any) {
-      toast.error("Failed to load medicines: " + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const categories = ["All", ...Array.from(new Set(medicines.map(m => m.category)))];
-
-  const filteredMedicines = medicines.filter(medicine => {
-    const matchesSearch = medicine.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         (medicine.description?.toLowerCase() || '').includes(searchTerm.toLowerCase());
+  const filteredMedicines = medicines.filter((medicine) => {
+    const matchesSearch =
+      medicine.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (medicine.description?.toLowerCase() || "").includes(searchTerm.toLowerCase());
     const matchesCategory = selectedCategory === "All" || medicine.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
 
   const addToCart = (medicine: Medicine) => {
-    const existingItem = cart.find(item => item.medicine.id === medicine.id);
+    const existingItem = cart.find((item) => item.medicine.id === medicine.id);
     if (existingItem) {
-      setCart(cart.map(item => 
-        item.medicine.id === medicine.id 
-          ? { ...item, quantity: item.quantity + 1 }
-          : item
-      ));
+      setCart(
+        cart.map((item) =>
+          item.medicine.id === medicine.id
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        )
+      );
     } else {
       setCart([...cart, { medicine, quantity: 1 }]);
     }
@@ -71,21 +78,31 @@ export default function Medicines() {
   };
 
   const removeFromCart = (medicineId: string) => {
-    setCart(cart.filter(item => item.medicine.id !== medicineId));
+    setCart(cart.filter((item) => item.medicine.id !== medicineId));
   };
 
   const updateQuantity = (medicineId: string, change: number) => {
-    setCart(cart.map(item => {
-      if (item.medicine.id === medicineId) {
-        const newQuantity = item.quantity + change;
-        return newQuantity > 0 ? { ...item, quantity: newQuantity } : item;
-      }
-      return item;
-    }).filter(item => item.quantity > 0));
+    setCart(
+      cart
+        .map((item) => {
+          if (item.medicine.id === medicineId) {
+            const newQuantity = item.quantity + change;
+            return newQuantity > 0 ? { ...item, quantity: newQuantity } : item;
+          }
+          return item;
+        })
+        .filter((item) => item.quantity > 0)
+    );
   };
 
-  const totalAmount = cart.reduce((sum, item) => sum + (item.medicine.price * item.quantity), 0);
+  const totalAmount = cart.reduce(
+    (sum, item) => sum + item.medicine.price * item.quantity,
+    0
+  );
 
+  // --------------------------------
+  // 2️⃣ Submit Order to Firebase
+  // --------------------------------
   const handleSubmitOrder = async () => {
     if (cart.length === 0) {
       toast.error("Please add medicines to your cart");
@@ -94,32 +111,43 @@ export default function Medicines() {
 
     try {
       // Get next order number
-      const { data: orderNum } = await supabase.rpc('get_next_order_number');
-      
-      // Create order
-      const { error } = await supabase
-        .from('medicine_orders')
-        .insert({
-          order_number: orderNum,
-          items: cart.map(item => ({
-            medicine_id: item.medicine.id,
-            medicine_name: item.medicine.name,
-            quantity: item.quantity,
-            price: item.medicine.price,
-          })),
-          total: totalAmount,
-          status: 'pending',
-        });
+      const orderCounterRef = ref(db, "orderCounter");
+      const transactionResult = await runTransaction(orderCounterRef, (current) => {
+        return (current || 0) + 1;
+      });
 
-      if (error) throw error;
+      if (!transactionResult.committed) {
+        throw new Error("Failed to get order number");
+      }
+
+      const orderNumber = transactionResult.snapshot.val();
+      const ordersRef = ref(db, "medicine_orders");
+      const newOrderRef = push(ordersRef);
+
+      await set(newOrderRef, {
+        order_number: orderNumber,
+        items: cart.map((item) => ({
+          medicine_id: item.medicine.id,
+          medicine_name: item.medicine.name,
+          quantity: item.quantity,
+          price: item.medicine.price,
+        })),
+        total: totalAmount,
+        status: "pending",
+        createdAt: serverTimestamp(),
+      });
 
       setOrderSubmitted(true);
       toast.success("Medicine order submitted successfully!");
     } catch (error: any) {
+      console.error("Firebase order error:", error);
       toast.error("Failed to submit order: " + error.message);
     }
   };
 
+  // --------------------------------
+  // 3️⃣  Confirmation page
+  // --------------------------------
   if (orderSubmitted) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-background to-background/80 p-4">
@@ -137,15 +165,25 @@ export default function Medicines() {
             <CardContent className="space-y-6">
               <div className="bg-muted/50 p-4 rounded-lg">
                 <h3 className="font-semibold mb-2">Order Summary</h3>
-                {cart.map(item => (
-                  <div key={item.medicine.id} className="flex justify-between text-sm mb-1">
-                    <span>{item.medicine.name} x{item.quantity}</span>
-                    <span>Rp {(item.medicine.price * item.quantity).toLocaleString('id-ID')}</span>
+                {cart.map((item) => (
+                  <div
+                    key={item.medicine.id}
+                    className="flex justify-between text-sm mb-1"
+                  >
+                    <span>
+                      {item.medicine.name} x{item.quantity}
+                    </span>
+                    <span>
+                      Rp{" "}
+                      {(item.medicine.price * item.quantity).toLocaleString("id-ID")}
+                    </span>
                   </div>
                 ))}
                 <div className="border-t border-border mt-2 pt-2 flex justify-between font-semibold">
                   <span>Total</span>
-                  <span className="text-accent">Rp {totalAmount.toLocaleString('id-ID')}</span>
+                  <span className="text-accent">
+                    Rp {totalAmount.toLocaleString("id-ID")}
+                  </span>
                 </div>
               </div>
               <p className="text-sm text-muted-foreground text-center">
@@ -167,6 +205,9 @@ export default function Medicines() {
     );
   }
 
+  // --------------------------------
+  // 4️⃣ Main UI for browsing medicines
+  // --------------------------------
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-background/80 p-4">
       <div className="container max-w-7xl mx-auto pt-8">
@@ -178,7 +219,7 @@ export default function Medicines() {
         </div>
 
         <div className="grid lg:grid-cols-3 gap-6">
-          {/* Main Content - Medicine List */}
+          {/* Medicine List */}
           <div className="lg:col-span-2 space-y-6">
             <Card className="border-accent/20 shadow-glow animate-fade-in">
               <CardHeader>
@@ -193,7 +234,6 @@ export default function Medicines() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Search */}
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
@@ -205,9 +245,8 @@ export default function Medicines() {
                   />
                 </div>
 
-                {/* Category Filter */}
                 <div className="flex gap-2 flex-wrap">
-                  {categories.map(category => (
+                  {categories.map((category) => (
                     <Button
                       key={category}
                       variant={selectedCategory === category ? "default" : "outline"}
@@ -219,27 +258,37 @@ export default function Medicines() {
                   ))}
                 </div>
 
-                {/* Medicine Grid */}
                 <div className="grid md:grid-cols-2 gap-4 mt-6">
-                  {filteredMedicines.map(medicine => (
-                    <Card key={medicine.id} className="border-border/50 hover:border-accent/50 transition-all">
+                  {filteredMedicines.map((medicine) => (
+                    <Card
+                      key={medicine.id}
+                      className="border-border/50 hover:border-accent/50 transition-all"
+                    >
                       <CardHeader>
                         <div className="flex justify-between items-start">
                           <div>
                             <CardTitle className="text-lg">{medicine.name}</CardTitle>
-                            <CardDescription className="text-xs">{medicine.category}</CardDescription>
+                            <CardDescription className="text-xs">
+                              {medicine.category}
+                            </CardDescription>
                           </div>
-                          <Badge variant={medicine.in_stock ? "default" : "destructive"}>
+                          <Badge
+                            variant={medicine.in_stock ? "default" : "destructive"}
+                          >
                             {medicine.in_stock ? "In Stock" : "Out of Stock"}
                           </Badge>
                         </div>
                       </CardHeader>
                       <CardContent>
-                        <p className="text-sm text-muted-foreground mb-3">{medicine.description}</p>
+                        <p className="text-sm text-muted-foreground mb-3">
+                          {medicine.description}
+                        </p>
                         <div className="flex justify-between items-center">
-                          <span className="text-xl font-bold text-accent">Rp {medicine.price.toLocaleString('id-ID')}</span>
-                          <Button 
-                            size="sm" 
+                          <span className="text-xl font-bold text-accent">
+                            Rp {medicine.price.toLocaleString("id-ID")}
+                          </span>
+                          <Button
+                            size="sm"
                             onClick={() => addToCart(medicine)}
                             disabled={!medicine.in_stock}
                           >
@@ -276,7 +325,7 @@ export default function Medicines() {
                   </p>
                 ) : (
                   <div className="space-y-4">
-                    {cart.map(item => (
+                    {cart.map((item) => (
                       <div key={item.medicine.id} className="bg-muted/50 p-3 rounded-lg">
                         <div className="flex justify-between items-start mb-2">
                           <span className="font-medium text-sm">{item.medicine.name}</span>
@@ -310,7 +359,8 @@ export default function Medicines() {
                             </Button>
                           </div>
                           <span className="font-semibold text-accent">
-                            Rp {(item.medicine.price * item.quantity).toLocaleString('id-ID')}
+                            Rp{" "}
+                            {(item.medicine.price * item.quantity).toLocaleString("id-ID")}
                           </span>
                         </div>
                       </div>
@@ -319,7 +369,9 @@ export default function Medicines() {
                     <div className="border-t border-border pt-4 mt-4">
                       <div className="flex justify-between items-center mb-4">
                         <span className="font-semibold">Total</span>
-                        <span className="text-2xl font-bold text-accent">Rp {totalAmount.toLocaleString('id-ID')}</span>
+                        <span className="text-2xl font-bold text-accent">
+                          Rp {totalAmount.toLocaleString("id-ID")}
+                        </span>
                       </div>
                       <Button className="w-full" size="lg" onClick={handleSubmitOrder}>
                         Submit Order

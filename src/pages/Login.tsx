@@ -7,6 +7,10 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeft, LogIn } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
+// Firebase imports
+import { db } from "@/config/firebase/firebase.js";
+import { ref, push, set, serverTimestamp } from "firebase/database";
+
 const Login = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -15,19 +19,44 @@ const Login = () => {
     password: "",
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Simple demo authentication
+
     if (formData.username === "admin" && formData.password === "admin") {
-      toast({
-        title: "Login Successful!",
-        description: "Redirecting to dashboard...",
-      });
-      setTimeout(() => {
-        navigate("/dashboard");
-      }, 1000);
+      try {
+        // --- record login into Firebase ---
+        const loginsRef = ref(db, "admin_logins"); // parent node 'admin_logins'
+        const newLoginRef = push(loginsRef);
+        await set(newLoginRef, {
+          username: formData.username,
+          loginTime: serverTimestamp(),
+          status: "success",
+        });
+
+        toast({
+          title: "Login Successful!",
+          description: "Redirecting to dashboard...",
+        });
+
+        setTimeout(() => navigate("/dashboard"), 1000);
+      } catch (error: any) {
+        console.error("Login log error:", error);
+        toast({
+          title: "Firebase Error",
+          description: error.message,
+          variant: "destructive",
+        });
+      }
     } else {
+      // also log failed attempts if you like
+      const loginsRef = ref(db, "admin_logins");
+      const newLoginRef = push(loginsRef);
+      await set(newLoginRef, {
+        username: formData.username || "unknown",
+        loginTime: serverTimestamp(),
+        status: "failed",
+      });
+
       toast({
         title: "Login Failed",
         description: "Invalid username or password",

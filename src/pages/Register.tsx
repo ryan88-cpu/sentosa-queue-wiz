@@ -6,8 +6,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useNavigate } from "react-router-dom";
 import { Check, ArrowLeft } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+
+// Import Firebase Realtime Database functions and your db instance
+import { db } from "@/config/firebase/firebase.js";  // Adjust the path if needed
+import { ref, set, push, runTransaction, serverTimestamp } from "firebase/database";
 
 export default function Register() {
   const navigate = useNavigate();
@@ -27,42 +30,60 @@ export default function Register() {
     }
 
     try {
-      // Insert patient
-      const { data: patient, error: patientError } = await supabase
-        .from('patients')
-        .insert({
-          full_name: formData.fullName,
-          date_of_birth: formData.dateOfBirth,
-          contact_number: formData.contactNumber,
-          reason_for_visit: formData.reasonForVisit,
-        })
-        .select()
-        .single();
+      // --- Firebase Logic Start ---
 
-      if (patientError) throw patientError;
-
-      // Get next queue number
-      const { data: queueNum } = await supabase.rpc('get_next_queue_number');
+      // 1. Get the next queue number using a transaction to avoid race conditions
+      const queueCounterRef = ref(db, 'queueCounter');
+      let newQueueNumber: number | null = null;
       
-      // Create queue entry
-      const { error: queueError } = await supabase
-        .from('queue_entries')
-        .insert({
-          patient_id: patient.id,
-          queue_number: queueNum,
-          status: 'waiting',
-          estimated_wait_time: queueNum * 15,
-        });
+      const transactionResult = await runTransaction(queueCounterRef, (currentValue) => {
+        // If the counter doesn't exist, initialize it. Otherwise, increment it.
+        return (currentValue || 0) + 1;
+      });
 
-      if (queueError) throw queueError;
+      if (!transactionResult.committed || transactionResult.snapshot.val() === null) {
+        throw new Error("Failed to get a queue number.");
+      }
+      newQueueNumber = transactionResult.snapshot.val();
 
-      setSubmittedQueueNumber(queueNum);
+      // 2. Create a new patient entry in the 'patients' collection
+      const patientsListRef = ref(db, 'patients');
+      const newPatientRef = push(patientsListRef); // `push` creates a unique ID
+      const newPatientId = newPatientRef.key;
+
+      if (!newPatientId) {
+        throw new Error("Failed to create a patient ID.");
+      }
+
+      await set(newPatientRef, {
+        ...formData,
+        createdAt: serverTimestamp(), // Store the registration time
+      });
+
+      // 3. Create a new queue entry in the 'queue' collection
+      const queueListRef = ref(db, 'queue');
+      const newQueueEntryRef = push(queueListRef); // `push` creates a unique ID for the queue item
+
+      await set(newQueueEntryRef, {
+        patientId: newPatientId,
+        queueNumber: newQueueNumber,
+        fullName: formData.fullName, // Denormalize for easy display in the queue list
+        status: 'waiting',
+        estimatedWaitTime: (newQueueNumber || 0) * 15, // Use the new queue number
+        registeredAt: serverTimestamp(),
+      });
+      
+      // --- Firebase Logic End ---
+
+      setSubmittedQueueNumber(newQueueNumber);
       toast.success("Registration successful!");
     } catch (error: any) {
+      console.error("Firebase registration error:", error);
       toast.error("Registration failed: " + error.message);
     }
   };
 
+  // The rest of your component's JSX remains the same
   if (submittedQueueNumber) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-background to-background/80 p-4">
