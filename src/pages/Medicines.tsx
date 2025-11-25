@@ -205,9 +205,6 @@ export default function Medicines() {
     );
   }
 
-  // --------------------------------
-  // 4️⃣ Main UI for browsing medicines
-  // --------------------------------
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-background/80 p-4">
       <div className="container max-w-7xl mx-auto pt-8">

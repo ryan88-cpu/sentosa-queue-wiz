@@ -133,11 +133,6 @@ const Login = () => {
             >
               Sign In
             </Button>
-
-            <div className="text-center text-sm text-muted-foreground">
-              <p className="mt-4">Demo credentials:</p>
-              <p className="font-mono">Username: admin | Password: admin</p>
-            </div>
           </form>
         </Card>
       </div>
