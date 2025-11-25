@@ -1,272 +1,235 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { useNavigate } from "react-router-dom";
-import { LogOut, CheckCircle, X, ArrowUp, ArrowDown } from "lucide-react";
+import { ArrowLeft, Users, Activity, Package, LogOut, FileText, Pill } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
-// Firebase
-import { db } from "@/config/firebase/firebase.js";
-import { ref, onValue, update, remove, push } from "firebase/database";
-
-interface PatientItem {
+interface Patient {
   id: string;
-  queueNumber: number;
-  fullName: string;
-  status: "waiting" | "being_examined" | "done";
-  dateOfBirth: string;
-  contactNumber: string;
-  reasonForVisit: string;
-  estimatedWaitTime: number;
+  full_name: string;
+  contact_number: string;
+  date_of_birth: string;
+  reason_for_visit: string;
+  created_at: string;
+}
+
+interface Prescription {
+  id: string;
+  diagnosis: string;
+  doctor_notes: string | null;
+  prescribed_medicines: any;
+  created_at: string;
+  updated_at: string;
+  patients: Patient;
 }
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [patients, setPatients] = useState<PatientItem[]>([]);
+  const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // 🔹 Fetch patients + queue live from Firebase
   useEffect(() => {
-    const patientsRef = ref(db, "patients");
-    const queueRef = ref(db, "queue");
-
-    const unsubPatients = onValue(patientsRef, (patientsSnap) => {
-      const patientsData = patientsSnap.val() || {};
-
-      onValue(queueRef, (queueSnap) => {
-        const queueData = queueSnap.val() || {};
-        const merged: PatientItem[] = Object.entries(queueData).map(([id, q]: any) => {
-          const p = patientsData[q.patientId];
-          return {
-            id,
-            queueNumber: q.queueNumber,
-            status: q.status,
-            estimatedWaitTime: q.estimatedWaitTime || 0,
-            fullName: p?.fullName || "Unknown Patient",
-            dateOfBirth: p?.dateOfBirth || "",
-            contactNumber: p?.contactNumber || "",
-            reasonForVisit: p?.reasonForVisit || "",
-          };
-        });
-
-        merged.sort((a, b) => a.queueNumber - b.queueNumber);
-        setPatients(merged);
-      });
-    });
-
-    return () => unsubPatients();
+    fetchPrescriptions();
   }, []);
 
-  // 🔹 Mark patient as done
-  const handleMarkAsDone = async (id: string) => {
-    const entryRef = ref(db, `queue/${id}`);
-    await update(entryRef, { status: "done" });
-    toast({ title: "Patient marked as done." });
-  };
+  const fetchPrescriptions = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("prescriptions")
+        .select(`
+          *,
+          patients (
+            id,
+            full_name,
+            contact_number,
+            date_of_birth,
+            reason_for_visit,
+            created_at
+          )
+        `)
+        .order("created_at", { ascending: false });
 
-  // 🔹 Cancel / remove patient
-  const handleCancel = async (id: string) => {
-    await remove(ref(db, `queue/${id}`));
-    toast({ title: "Patient removed from queue." });
-  };
-
-  // 🔹 Move patient up or down (reorder queue numbers)
-  const handleMove = async (index: number, direction: "up" | "down") => {
-    const targetIndex = direction === "up" ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= patients.length) return;
-
-    const newOrder = [...patients];
-    [newOrder[index], newOrder[targetIndex]] = [newOrder[targetIndex], newOrder[index]];
-    // update queue numbers in Firebase
-    for (let i = 0; i < newOrder.length; i++) {
-      const entryRef = ref(db, `queue/${newOrder[i].id}`);
-      await update(entryRef, { queueNumber: i + 1 });
-    }
-    toast({ title: "Queue reordered" });
-  };
-
-  // 🔹 Approve (mark from waiting -> being_examined)
-  const handleApprove = async (id: string) => {
-    const entryRef = ref(db, `queue/${id}`);
-    await update(entryRef, { status: "being_examined" });
-    toast({ title: "Patient approved for examination." });
-  };
-
-  // 🔹 Logout
-  const handleLogout = () => {
-    toast({
-      title: "Logged Out",
-      description: "You have been successfully logged out",
-    });
-    navigate("/login");
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "being_examined":
-        return "bg-accent text-accent-foreground";
-      case "waiting":
-        return "bg-secondary text-secondary-foreground";
-      case "done":
-        return "bg-muted text-muted-foreground";
-      default:
-        return "bg-secondary";
+      if (error) throw error;
+      setPrescriptions(data || []);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Navbar */}
-      <nav className="bg-card border-b border-border">
-        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-foreground">
-            Admin Dashboard
-          </h1>
+    <div className="min-h-screen bg-gradient-to-b from-background to-background/80 p-4">
+      <div className="container max-w-7xl mx-auto pt-8">
+        <div className="flex justify-between items-center mb-8">
           <Button
-            onClick={handleLogout}
+            onClick={() => navigate("/")}
+            variant="ghost"
+            className="text-accent hover:text-accent/80 hover:bg-accent/10"
+          >
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Home
+          </Button>
+          
+          <Button
+            onClick={() => navigate("/")}
             variant="outline"
-            className="border-accent text-accent hover:bg-accent/10"
+            className="border-destructive text-destructive hover:bg-destructive/10"
           >
             <LogOut className="mr-2 h-4 w-4" />
             Logout
           </Button>
         </div>
-      </nav>
 
-      {/* Stats Summary */}
-      <div className="container mx-auto px-4 py-8 grid md:grid-cols-4 gap-4 mb-8">
-        <Card className="p-6">
-          <p className="text-sm text-muted-foreground mb-1">Total Patients</p>
-          <p className="text-3xl font-bold text-foreground">{patients.length}</p>
-        </Card>
-        <Card className="p-6">
-          <p className="text-sm text-muted-foreground mb-1">Waiting</p>
-          <p className="text-3xl font-bold text-accent">
-            {patients.filter((p) => p.status === "waiting").length}
+        <div className="text-center mb-12">
+          <h1 className="text-4xl font-bold mb-4 text-foreground">Admin Dashboard</h1>
+          <p className="text-muted-foreground text-lg">
+            Manage patients, queue, and clinic operations
           </p>
-        </Card>
-        <Card className="p-6">
-          <p className="text-sm text-muted-foreground mb-1">Examining</p>
-          <p className="text-3xl font-bold text-accent">
-            {patients.filter((p) => p.status === "being_examined").length}
-          </p>
-        </Card>
-        <Card className="p-6">
-          <p className="text-sm text-muted-foreground mb-1">Completed</p>
-          <p className="text-3xl font-bold text-accent">
-            {patients.filter((p) => p.status === "done").length}
-          </p>
-        </Card>
-      </div>
+        </div>
 
-      {/* Queue Management */}
-      <div className="container mx-auto px-4 pb-12">
-        <Card className="p-6">
-          <h2 className="text-2xl font-bold mb-6 text-foreground">
-            Patient Queue Management
-          </h2>
-          {patients.length === 0 ? (
-            <p className="text-center text-muted-foreground py-8">
-              No registered patients.
-            </p>
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <Card className="p-6 bg-card border-border hover:shadow-lg transition-all cursor-pointer group">
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className="p-4 bg-accent/20 rounded-full group-hover:bg-accent/30 transition-colors">
+                <Users className="w-8 h-8 text-accent" />
+              </div>
+              <h3 className="text-xl font-semibold text-foreground">Patient Queue</h3>
+              <Button 
+                onClick={() => navigate("/queue")}
+                className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
+              >
+                View Queue
+              </Button>
+            </div>
+          </Card>
+
+          <Card className="p-6 bg-card border-border hover:shadow-lg transition-all cursor-pointer group">
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className="p-4 bg-accent/20 rounded-full group-hover:bg-accent/30 transition-colors">
+                <Activity className="w-8 h-8 text-accent" />
+              </div>
+              <h3 className="text-xl font-semibold text-foreground">Patient Records</h3>
+              <Button 
+                onClick={() => navigate("/register")}
+                className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
+              >
+                View Records
+              </Button>
+            </div>
+          </Card>
+
+          <Card className="p-6 bg-card border-border hover:shadow-lg transition-all cursor-pointer group">
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className="p-4 bg-accent/20 rounded-full group-hover:bg-accent/30 transition-colors">
+                <Package className="w-8 h-8 text-accent" />
+              </div>
+              <h3 className="text-xl font-semibold text-foreground">Medicine Inventory</h3>
+              <Button 
+                onClick={() => navigate("/medicines")}
+                className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
+              >
+                View Inventory
+              </Button>
+            </div>
+          </Card>
+
+          <Card className="p-6 bg-card border-border hover:shadow-lg transition-all cursor-pointer group">
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className="p-4 bg-accent/20 rounded-full group-hover:bg-accent/30 transition-colors">
+                <FileText className="w-8 h-8 text-accent" />
+              </div>
+              <h3 className="text-xl font-semibold text-foreground">Prescriptions</h3>
+              <Button 
+                onClick={() => navigate("/prescriptions")}
+                className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
+              >
+                Create New
+              </Button>
+            </div>
+          </Card>
+        </div>
+
+        <Card className="p-6 bg-card border-border">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-foreground">Patient Diagnosis Data</h2>
+            <Button
+              onClick={fetchPrescriptions}
+              variant="outline"
+              className="border-accent text-accent hover:bg-accent/10"
+            >
+              Refresh
+            </Button>
+          </div>
+
+          {loading ? (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground">Loading prescriptions...</p>
+            </div>
+          ) : prescriptions.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground">No prescriptions found</p>
+            </div>
           ) : (
-            <div className="space-y-4">
-              {patients.map((p, index) => (
-                <Card
-                  key={p.id}
-                  className={`p-6 ${
-                    p.status === "being_examined"
-                      ? "bg-accent/20 border-accent"
-                      : "bg-secondary border-border"
-                  }`}
-                >
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div className="flex items-start gap-4 flex-1">
-                      <div className="text-2xl font-bold px-3 py-1 bg-background rounded-lg text-accent">
-                        #{p.queueNumber}
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="text-lg font-semibold mb-2">
-                          {p.fullName}
-                        </h3>
-                        <div className="space-y-1 text-sm text-muted-foreground">
-                          <p>
-                            <span className="font-medium">DOB:</span>{" "}
-                            {p.dateOfBirth}
-                          </p>
-                          <p>
-                            <span className="font-medium">Contact:</span>{" "}
-                            {p.contactNumber}
-                          </p>
-                          <p>
-                            <span className="font-medium">Reason:</span>{" "}
-                            {p.reasonForVisit}
-                          </p>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Patient Name</TableHead>
+                    <TableHead>Diagnosis</TableHead>
+                    <TableHead>Prescribed Medicines</TableHead>
+                    <TableHead>Doctor's Notes</TableHead>
+                    <TableHead>Date</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {prescriptions.map((prescription) => (
+                    <TableRow key={prescription.id}>
+                      <TableCell className="font-medium">
+                        {prescription.patients.full_name}
+                      </TableCell>
+                      <TableCell>{prescription.diagnosis}</TableCell>
+                      <TableCell>
+                        <div className="space-y-1">
+                          {Array.isArray(prescription.prescribed_medicines) &&
+                            prescription.prescribed_medicines.map((med: any, idx: number) => (
+                              <div key={idx} className="text-sm">
+                                <div className="flex items-center gap-1">
+                                  <Pill className="h-3 w-3 text-accent" />
+                                  <span className="font-medium">{med.medicine_name}</span>
+                                </div>
+                                <div className="text-muted-foreground ml-4">
+                                  {med.dosage} - {med.frequency} for {med.duration}
+                                </div>
+                              </div>
+                            ))}
                         </div>
-                        <Badge
-                          className={`${getStatusColor(p.status)} mt-2`}
-                        >
-                          {p.status
-                            .replace("_", " ")
-                            .replace(/\b\w/g, (c) => c.toUpperCase())}
-                        </Badge>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleMove(index, "up")}
-                        disabled={index === 0}
-                        className="border-accent text-accent hover:bg-accent/10"
-                      >
-                        <ArrowUp className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleMove(index, "down")}
-                        disabled={index === patients.length - 1}
-                        className="border-accent text-accent hover:bg-accent/10"
-                      >
-                        <ArrowDown className="h-4 w-4" />
-                      </Button>
-
-                      {p.status === "waiting" && (
-                        <Button
-                          size="sm"
-                          onClick={() => handleApprove(p.id)}
-                          className="bg-accent hover:bg-accent/90 text-accent-foreground"
-                        >
-                          <CheckCircle className="mr-1 h-4 w-4" />
-                          Approve
-                        </Button>
-                      )}
-
-                      {p.status !== "done" && (
-                        <Button
-                          size="sm"
-                          onClick={() => handleMarkAsDone(p.id)}
-                          className="bg-green-600 hover:bg-green-700 text-white"
-                        >
-                          ✅ Mark Done
-                        </Button>
-                      )}
-
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => handleCancel(p.id)}
-                      >
-                        <X className="mr-1 h-4 w-4" />
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
-              ))}
+                      </TableCell>
+                      <TableCell className="max-w-xs">
+                        {prescription.doctor_notes || <span className="text-muted-foreground italic">No notes</span>}
+                      </TableCell>
+                      <TableCell>
+                        {new Date(prescription.created_at).toLocaleDateString()}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           )}
         </Card>

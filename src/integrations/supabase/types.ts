@@ -115,6 +115,44 @@ export type Database = {
         }
         Relationships: []
       }
+      prescriptions: {
+        Row: {
+          created_at: string | null
+          diagnosis: string
+          doctor_notes: string | null
+          id: string
+          patient_id: string
+          prescribed_medicines: Json
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          diagnosis: string
+          doctor_notes?: string | null
+          id?: string
+          patient_id: string
+          prescribed_medicines?: Json
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          diagnosis?: string
+          doctor_notes?: string | null
+          id?: string
+          patient_id?: string
+          prescribed_medicines?: Json
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prescriptions_patient_id_fkey"
+            columns: ["patient_id"]
+            isOneToOne: false
+            referencedRelation: "patients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       queue_entries: {
         Row: {
           called_at: string | null
