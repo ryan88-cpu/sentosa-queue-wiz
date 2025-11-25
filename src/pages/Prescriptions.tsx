@@ -7,7 +7,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { db } from "@/config/firebase/firebase";
+import { ref, get, push, set, child } from "firebase/database";
 
 interface Patient {
   id: string;
@@ -24,9 +25,18 @@ interface PrescribedMedicine {
   duration: string;
 }
 
+interface Medicine {
+  id: string;
+  name: string;
+  dosage: string;
+  frequency: string;
+  duration: string;
+}
+
 const Prescriptions = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+
   const [patients, setPatients] = useState<Patient[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<string>("");
   const [diagnosis, setDiagnosis] = useState("");
@@ -34,29 +44,60 @@ const Prescriptions = () => {
   const [prescribedMedicines, setPrescribedMedicines] = useState<PrescribedMedicine[]>([
     { medicine_name: "", dosage: "", frequency: "", duration: "" },
   ]);
+  const [availableMedicines, setAvailableMedicines] = useState<Medicine[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Fetch patients and medicines on page load
   useEffect(() => {
-    fetchPatients();
+    const fetchData = async () => {
+      await fetchPatients();
+      await fetchMedicines();
+      setLoading(false);
+    };
+    fetchData();
   }, []);
 
+  // Fetch patients list from Firebase
   const fetchPatients = async () => {
     try {
-      const { data, error } = await supabase
-        .from("patients")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      setPatients(data || []);
+      const snapshot = await get(ref(db, "patients"));
+      if (snapshot.exists()) {
+        const patientsData = Object.entries(snapshot.val()).map(([id, value]: any) => ({
+          id,
+          ...value,
+        }));
+        setPatients(patientsData);
+      } else {
+        setPatients([]);
+      }
     } catch (error: any) {
       toast({
-        title: "Error",
+        title: "Error fetching patients",
         description: error.message,
         variant: "destructive",
       });
-    } finally {
-      setLoading(false);
+    }
+  };
+
+  // Fetch available medicines list from Firebase
+  const fetchMedicines = async () => {
+    try {
+      const snapshot = await get(ref(db, "medicines"));
+      if (snapshot.exists()) {
+        const medsData = Object.entries(snapshot.val()).map(([id, value]: any) => ({
+          id,
+          ...value,
+        }));
+        setAvailableMedicines(medsData);
+      } else {
+        setAvailableMedicines([]);
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error fetching medicines",
+        description: error.message,
+        variant: "destructive",
+      });
     }
   };
 
@@ -71,9 +112,19 @@ const Prescriptions = () => {
     setPrescribedMedicines(prescribedMedicines.filter((_, i) => i !== index));
   };
 
-  const updateMedicine = (index: number, field: keyof PrescribedMedicine, value: string) => {
+  const handleMedicineSelection = (index: number, medicineName: string) => {
+    const selected = availableMedicines.find((med) => med.name === medicineName);
     const updated = [...prescribedMedicines];
-    updated[index][field] = value;
+    if (selected) {
+      updated[index] = {
+        medicine_name: selected.name,
+        dosage: selected.dosage || "",
+        frequency: selected.frequency || "",
+        duration: selected.duration || "",
+      };
+    } else {
+      updated[index] = { medicine_name: "", dosage: "", frequency: "", duration: "" };
+    }
     setPrescribedMedicines(updated);
   };
 
@@ -103,28 +154,29 @@ const Prescriptions = () => {
     );
 
     try {
-      const { error } = await supabase.from("prescriptions").insert({
+      const newPrescriptionRef = push(ref(db, "prescriptions"));
+      await set(newPrescriptionRef, {
         patient_id: selectedPatient,
         diagnosis,
         doctor_notes: doctorNotes,
         prescribed_medicines: validMedicines,
-      } as any);
-
-      if (error) throw error;
+        status: "pending",
+        created_at: new Date().toISOString(),
+      });
 
       toast({
         title: "Success",
         description: "Prescription created successfully",
       });
 
-      // Reset form
+      // Reset the form
       setSelectedPatient("");
       setDiagnosis("");
       setDoctorNotes("");
       setPrescribedMedicines([{ medicine_name: "", dosage: "", frequency: "", duration: "" }]);
     } catch (error: any) {
       toast({
-        title: "Error",
+        title: "Error saving prescription",
         description: error.message,
         variant: "destructive",
       });
@@ -155,6 +207,7 @@ const Prescriptions = () => {
           <h1 className="text-3xl font-bold mb-6 text-foreground">Create Prescription</h1>
 
           <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Patient Selection */}
             <div className="space-y-2">
               <Label htmlFor="patient" className="text-foreground">
                 Select Patient
@@ -175,6 +228,7 @@ const Prescriptions = () => {
               </select>
             </div>
 
+            {/* Diagnosis */}
             <div className="space-y-2">
               <Label htmlFor="diagnosis" className="text-foreground">
                 Diagnosis
@@ -189,6 +243,7 @@ const Prescriptions = () => {
               />
             </div>
 
+            {/* Doctor's Notes */}
             <div className="space-y-2">
               <Label htmlFor="notes" className="text-foreground">
                 Doctor's Notes (Optional)
@@ -202,6 +257,7 @@ const Prescriptions = () => {
               />
             </div>
 
+            {/* Medicine Selection */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <Label className="text-foreground">Prescribed Medicines</Label>
@@ -236,43 +292,45 @@ const Prescriptions = () => {
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                     <div>
-                      <Label className="text-sm text-muted-foreground">Medicine Name</Label>
-                      <Input
+                      <Label className="text-sm text-muted-foreground">Select Medicine</Label>
+                      <select
                         value={medicine.medicine_name}
-                        onChange={(e) =>
-                          updateMedicine(index, "medicine_name", e.target.value)
-                        }
-                        className="bg-background border-border text-foreground"
-                        placeholder="e.g., Paracetamol"
-                      />
+                        onChange={(e) => handleMedicineSelection(index, e.target.value)}
+                        className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground focus:border-accent focus:outline-none"
+                      >
+                        <option value="">-- Select Medicine --</option>
+                        {availableMedicines.map((med) => (
+                          <option key={med.id} value={med.name}>
+                            {med.name}
+                          </option>
+                        ))}
+                      </select>
                     </div>
+
                     <div>
                       <Label className="text-sm text-muted-foreground">Dosage</Label>
                       <Input
                         value={medicine.dosage}
-                        onChange={(e) => updateMedicine(index, "dosage", e.target.value)}
-                        className="bg-background border-border text-foreground"
-                        placeholder="e.g., 500mg"
+                        readOnly
+                        className="bg-muted border-border text-foreground"
                       />
                     </div>
                     <div>
                       <Label className="text-sm text-muted-foreground">Frequency</Label>
                       <Input
                         value={medicine.frequency}
-                        onChange={(e) => updateMedicine(index, "frequency", e.target.value)}
-                        className="bg-background border-border text-foreground"
-                        placeholder="e.g., 3 times daily"
+                        readOnly
+                        className="bg-muted border-border text-foreground"
                       />
                     </div>
                     <div>
                       <Label className="text-sm text-muted-foreground">Duration</Label>
                       <Input
                         value={medicine.duration}
-                        onChange={(e) => updateMedicine(index, "duration", e.target.value)}
-                        className="bg-background border-border text-foreground"
-                        placeholder="e.g., 7 days"
+                        readOnly
+                        className="bg-muted border-border text-foreground"
                       />
                     </div>
                   </div>
@@ -280,6 +338,7 @@ const Prescriptions = () => {
               ))}
             </div>
 
+            {/* Submit */}
             <Button
               type="submit"
               className="w-full bg-accent hover:bg-accent/90 text-accent-foreground font-medium text-lg py-6"
