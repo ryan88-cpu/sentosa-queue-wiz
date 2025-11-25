@@ -30,6 +30,7 @@ interface Prescription {
   prescribed_medicines: any;
   created_at: string;
   updated_at: string;
+  status: string;
   patients: Patient;
 }
 
@@ -37,10 +38,12 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
+  const [completedPrescriptions, setCompletedPrescriptions] = useState<Prescription[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchPrescriptions();
+    fetchCompletedPrescriptions();
   }, []);
 
   const fetchPrescriptions = async () => {
@@ -70,6 +73,35 @@ const Dashboard = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchCompletedPrescriptions = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("prescriptions")
+        .select(`
+          *,
+          patients (
+            id,
+            full_name,
+            contact_number,
+            date_of_birth,
+            reason_for_visit,
+            created_at
+          )
+        `)
+        .eq("status", "dispensed")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setCompletedPrescriptions(data || []);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
     }
   };
 
@@ -163,6 +195,21 @@ const Dashboard = () => {
               </Button>
             </div>
           </Card>
+
+          <Card className="p-6 bg-card border-border hover:shadow-lg transition-all cursor-pointer group">
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className="p-4 bg-accent/20 rounded-full group-hover:bg-accent/30 transition-colors">
+                <Pill className="w-8 h-8 text-accent" />
+              </div>
+              <h3 className="text-xl font-semibold text-foreground">Pharmacy</h3>
+              <Button 
+                onClick={() => navigate("/pharmacy")}
+                className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
+              >
+                Dispense Medicines
+              </Button>
+            </div>
+          </Card>
         </div>
 
         <Card className="p-6 bg-card border-border">
@@ -190,15 +237,92 @@ const Dashboard = () => {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Patient Name</TableHead>
-                    <TableHead>Diagnosis</TableHead>
-                    <TableHead>Prescribed Medicines</TableHead>
-                    <TableHead>Doctor's Notes</TableHead>
-                    <TableHead>Date</TableHead>
+                  <TableHead>Patient Name</TableHead>
+                  <TableHead>Diagnosis</TableHead>
+                  <TableHead>Prescribed Medicines</TableHead>
+                  <TableHead>Doctor's Notes</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Date</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {prescriptions.map((prescription) => (
+                    <TableRow key={prescription.id}>
+                      <TableCell className="font-medium">
+                        {prescription.patients.full_name}
+                      </TableCell>
+                      <TableCell>{prescription.diagnosis}</TableCell>
+                      <TableCell>
+                        <div className="space-y-1">
+                          {Array.isArray(prescription.prescribed_medicines) &&
+                            prescription.prescribed_medicines.map((med: any, idx: number) => (
+                              <div key={idx} className="text-sm">
+                                <div className="flex items-center gap-1">
+                                  <Pill className="h-3 w-3 text-accent" />
+                                  <span className="font-medium">{med.medicine_name}</span>
+                                </div>
+                                <div className="text-muted-foreground ml-4">
+                                  {med.dosage} - {med.frequency} for {med.duration}
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      </TableCell>
+                      <TableCell className="max-w-xs">
+                        {prescription.doctor_notes || <span className="text-muted-foreground italic">No notes</span>}
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={`px-2 py-1 rounded text-xs font-medium ${
+                            prescription.status === "dispensed"
+                              ? "bg-green-500/20 text-green-500"
+                              : "bg-yellow-500/20 text-yellow-500"
+                          }`}
+                        >
+                          {prescription.status === "dispensed" ? "Dispensed" : "Pending"}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        {new Date(prescription.created_at).toLocaleDateString()}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </Card>
+
+        <Card className="p-6 bg-card border-border mt-8">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-foreground">Completed Patient Records (Dispensed)</h2>
+            <Button
+              onClick={fetchCompletedPrescriptions}
+              variant="outline"
+              className="border-accent text-accent hover:bg-accent/10"
+            >
+              Refresh
+            </Button>
+          </div>
+
+          {completedPrescriptions.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground">No completed prescriptions yet</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Patient Name</TableHead>
+                    <TableHead>Diagnosis</TableHead>
+                    <TableHead>Prescribed Medicines</TableHead>
+                    <TableHead>Doctor's Notes</TableHead>
+                    <TableHead>Date Dispensed</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {completedPrescriptions.map((prescription) => (
                     <TableRow key={prescription.id}>
                       <TableCell className="font-medium">
                         {prescription.patients.full_name}
